@@ -123,11 +123,42 @@ keyboard_state = {"up": False, "down": False, "left": False, "right": False}
 
 def reshape(width, height):
     """Callback para quando a janela é redimensionada."""
+    
+    # Define a área de desenho para o tamanho da janela
     glViewport(0, 0, width, height)
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
-    # Inverte o eixo Y para corresponder às coordenadas do arquivo
-    glOrtho(0, WORLD_WIDTH, WORLD_HEIGHT, 0, -1, 1)
+    
+    global WORLD_WIDTH, WORLD_HEIGHT
+    
+    # ⚠️ NOVO CÓDIGO PARA CORRIGIR O ASPECT RATIO ⚠️
+    
+    # Calcula a proporção de aspecto da janela atual em pixels
+    aspect_ratio_window = width / height
+    
+    # Calcula a proporção de aspecto do mundo de jogo
+    aspect_ratio_world = WORLD_WIDTH / WORLD_HEIGHT
+    
+    # Variáveis para a nova área visível (projection)
+    final_width = WORLD_WIDTH
+    final_height = WORLD_HEIGHT
+
+    # Ajusta o mundo de forma que ele se ajuste à janela mantendo o 1:1
+    if aspect_ratio_window > aspect_ratio_world:
+        # A janela é muito mais larga que o mundo.
+        # Precisamos aumentar a largura visível (final_width) para preencher os lados.
+        final_width = WORLD_HEIGHT * aspect_ratio_window
+    elif aspect_ratio_window < aspect_ratio_world:
+        # A janela é muito mais alta que o mundo.
+        # Precisamos aumentar a altura visível (final_height) para preencher o topo/base.
+        final_height = WORLD_WIDTH / aspect_ratio_window
+
+    # Define a projeção com os novos limites corrigidos
+    # Inverte o eixo Y (se necessário para a coordenada 0,0 ser topo-esquerda)
+    glOrtho(0, final_width, final_height, 0, -1, 1) 
+    
+    # FIM DA CORREÇÃO
+    
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
 
@@ -183,13 +214,47 @@ def update(value):
     for i in range(len(all_entities)):
         for j in range(i + 1, len(all_entities)):
             e1, e2 = all_entities[i], all_entities[j]
-            if e1.is_active and e2.is_active:
+            
+            if not (e1.is_active and e2.is_active):
+                continue
+            
+            # --- LÓGICA HÍBRIDA DE COLISÃO ---
+            colisao_detectada = False
+            
+            # Caso A: Colisão Envolvendo um Marker (Usa Distância)
+            if isinstance(e1, Marker) or isinstance(e2, Marker):
+                # 1. Calcule a distância entre os centros
                 dist = math.hypot(e1.x - e2.x, e1.y - e2.y)
-                if dist < PROXIMITY_THRESHOLD:
-                    e1.color = e2.color = [1.0, 0.0, 0.0]
-                    # Se qualquer uma das entidades na colisão for o Avatar, marca para reset
-                    if isinstance(e1, Avatar) or isinstance(e2, Avatar):
-                        avatar_colidiu = True
+                
+                # 2. Defina o raio total de colisão necessário
+                # Use a soma dos raios: Marker.size/2 + Avatar/Person.size/2
+                # Vamos simplificar definindo um THRESHOLD fixo para o Marker.
+                MARKER_COLLISION_THRESHOLD = 0.65 # Ajuste este valor!
+                
+                if dist < MARKER_COLLISION_THRESHOLD:
+                    colisao_detectada = True
+            
+            # Caso B: Colisão entre Quadrados (Avatar/Person) (Usa AABB)
+            else:
+                e1_half_size = e1.size / 2
+                e2_half_size = e2.size / 2
+                
+                overlap_x = (e1.x + e1_half_size > e2.x - e2_half_size) and \
+                            (e1.x - e1_half_size < e2.x + e2_half_size)
+                            
+                overlap_y = (e1.y + e1_half_size > e2.y - e2_half_size) and \
+                            (e1.y - e1_half_size < e2.y + e2_half_size)
+                            
+                if overlap_x and overlap_y:
+                    colisao_detectada = True
+            
+            # --- AÇÃO DA COLISÃO ---
+            if colisao_detectada:
+                # Altera as cores para vermelho
+                e1.color = e2.color = [1.0, 0.0, 0.0]
+                
+                if isinstance(e1, Avatar) or isinstance(e2, Avatar):
+                    avatar_colidiu = True
     
     if avatar_colidiu:
         print("\n--- FIM DE JOGO ---")
@@ -199,13 +264,14 @@ def update(value):
     # 3.3. Lógica de Saída da Tela
     global exit_count
 
-    saiu_da_tela = (avatar.x < 0 or avatar.x > WORLD_WIDTH or 
-                    avatar.y < 0 or avatar.y > WORLD_HEIGHT)
+    saiu_da_tela = (avatar.x < 0 or avatar.x > 1200 or 
+                    avatar.y < 0 or avatar.y > 300)
 
     if saiu_da_tela:
-        # APENAS RESET DE POSIÇÃO, COR E CONTADOR
-        avatar.x = WORLD_WIDTH / 2
-        avatar.y = WORLD_HEIGHT / 2
+        new_marker = Marker(avatar.x, avatar.y)
+        all_entities.append(new_marker)
+        avatar.x = 1200 / 2
+        avatar.y = 300 / 2
         avatar.color = [0.0, 1.0, 1.0] 
         exit_count += 1
 
@@ -244,13 +310,51 @@ def cleanup_and_exit():
     # Termina o programa Python (opcional, mas limpa)
     glutLeaveMainLoop()
 
+
+class Marker(Person):
+    """Representa um marcador estático, criado onde o Avatar saiu da tela."""
+    def __init__(self, x_pos, y_pos):
+        # Chama o construtor da Person, mas com um path vazio, para evitar erros
+        super().__init__(path_data=[], scaling_factor=1) 
+        
+        # Define a posição de forma estática
+        self.x, self.y = x_pos, y_pos
+        
+        # Define uma cor de marcador estático (ex: roxo)
+        self.color = [0.8, 0.2, 0.8] 
+        self.size = 0.15 # Menor para ser um ponto de marcação
+        self.is_active = True
+    def draw(self):
+        if self.is_active:
+            glColor3fv(self.color)
+            
+            # --- NOVO FORMATO: CÍRCULO / DIAMANTE ---
+            
+            sides = 30 # Número de lados do polígono (16 lados parece um círculo)
+            radius = 0.45
+
+            glBegin(GL_POLYGON)
+            for i in range(sides):
+                # Calcula o ângulo em radianos
+                angle = 2 * math.pi * i / sides
+                
+                # Calcula a coordenada X e Y na circunferência
+                x_coord = self.x + (math.cos(angle) * radius)
+                y_coord = self.y + (math.sin(angle) * radius)
+                
+                glVertex2f(x_coord, y_coord)
+            glEnd()
+    def update(self, frame_count):
+        """Um marcador estático não se move nem verifica frames."""
+        pass 
+
 # --- 5. FUNÇÃO PRINCIPAL ---
 
 def main():
     """Função principal que inicializa o GLUT e inicia o loop de eventos."""
     global SCALE, PATHS, MAX_COORDS, WORLD_WIDTH, WORLD_HEIGHT
     global people, avatar, all_entities, max_frames
-    AMPLITUDE_FACTOR = 0.5
+    AMPLITUDE_FACTOR = 1.5
     
     # Carrega e analisa os dados do arquivo
     SCALE, PATHS, MAX_COORDS = parse_paths_file()
@@ -258,8 +362,8 @@ def main():
 
     SCALE_VISUAL = SCALE * AMPLITUDE_FACTOR
     
-    WORLD_WIDTH = MAX_COORDS[0] / SCALE
-    WORLD_HEIGHT = MAX_COORDS[1] / SCALE
+    WORLD_WIDTH = MAX_COORDS[0] / SCALE_VISUAL
+    WORLD_HEIGHT = MAX_COORDS[1] / SCALE_VISUAL
     
     # Cria as entidades
     people = [Person(path, SCALE) for path in PATHS]
@@ -272,7 +376,7 @@ def main():
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB)
     
     # Configura e cria a janela
-    glutInitWindowSize(1200, 800)
+    glutInitWindowSize(1200, 300)
     glutInitWindowPosition(100, 100)
     glutCreateWindow("T1 - Visualizador de Trajetorias (GLUT) - CG 2025/2".encode('utf-8'))
     
