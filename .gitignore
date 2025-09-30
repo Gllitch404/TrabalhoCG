@@ -1,0 +1,3 @@
+# Conteúdo básico do .gitignore
+__pycache__/
+*.pyc
