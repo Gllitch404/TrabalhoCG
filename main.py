@@ -4,6 +4,7 @@ from OpenGL.GLU import *
 from OpenGL.GLUT import *
 import re
 import math
+import sys
 
 # --- 1. DATA PARSING ---
 # Esta seção não muda, pois é independente da biblioteca gráfica.
@@ -113,6 +114,7 @@ WORLD_WIDTH, WORLD_HEIGHT = 0, 0
 people, avatar, all_entities = [], None, []
 frame_counter, max_frames = 0, 0
 animation_direction = 1 # 1 para frente, -1 para trás
+exit_count = 0 # Contador de saídas da tela
 
 # Estado da entrada do teclado
 keyboard_state = {"up": False, "down": False, "left": False, "right": False}
@@ -144,6 +146,7 @@ def update(value):
     Esta função é o coração da lógica da aplicação.
     """
     global frame_counter, animation_direction # Adicione animation_direction
+    PROXIMITY_THRESHOLD = 0.5
 
     # 1. Atualiza o estado da animação (NOVA LÓGICA)
     
@@ -173,6 +176,9 @@ def update(value):
     PROXIMITY_THRESHOLD = 0.5
     for entity in all_entities:
         entity.color = [1.0, 0.5, 0.2] if isinstance(entity, Avatar) else [0.2, 0.5, 1.0]
+    
+    # 3.2. Lógica de Colisão
+    avatar_colidiu = False
 
     for i in range(len(all_entities)):
         for j in range(i + 1, len(all_entities)):
@@ -181,6 +187,27 @@ def update(value):
                 dist = math.hypot(e1.x - e2.x, e1.y - e2.y)
                 if dist < PROXIMITY_THRESHOLD:
                     e1.color = e2.color = [1.0, 0.0, 0.0]
+                    # Se qualquer uma das entidades na colisão for o Avatar, marca para reset
+                    if isinstance(e1, Avatar) or isinstance(e2, Avatar):
+                        avatar_colidiu = True
+    
+    if avatar_colidiu:
+        print("\n--- FIM DE JOGO ---")
+        print("Colisão detectada! Encerrando...")
+        cleanup_and_exit() # Encerra a simulação imediatamente
+    
+    # 3.3. Lógica de Saída da Tela
+    global exit_count
+
+    saiu_da_tela = (avatar.x < 0 or avatar.x > WORLD_WIDTH or 
+                    avatar.y < 0 or avatar.y > WORLD_HEIGHT)
+
+    if saiu_da_tela:
+        # APENAS RESET DE POSIÇÃO, COR E CONTADOR
+        avatar.x = WORLD_WIDTH / 2
+        avatar.y = WORLD_HEIGHT / 2
+        avatar.color = [0.0, 1.0, 1.0] 
+        exit_count += 1
 
     # 4. Solicita que o GLUT redesenhe a tela
     glutPostRedisplay()
@@ -202,6 +229,20 @@ def special_key_up(key, x, y):
     if key == GLUT_KEY_DOWN:  keyboard_state["down"] = False
     if key == GLUT_KEY_LEFT:  keyboard_state["left"] = False
     if key == GLUT_KEY_RIGHT: keyboard_state["right"] = False
+
+
+def cleanup_and_exit():
+    """Exibe o contador final e fecha o programa."""
+    global exit_count
+    
+    # Imprime a mensagem final no console
+    print("\n-------------------------------------------")
+    print("FIM DA SIMULAÇÃO")
+    print(f"O Avatar saiu da tela um total de: {exit_count} vezes.")
+    print("-------------------------------------------")
+    
+    # Termina o programa Python (opcional, mas limpa)
+    glutLeaveMainLoop()
 
 # --- 5. FUNÇÃO PRINCIPAL ---
 
@@ -252,8 +293,13 @@ def main():
     # Inicia o primeiro ciclo de animação
     glutTimerFunc(0, update, 0)
     
+    # Registra a função de limpeza na saída
+    glutWMCloseFunc(cleanup_and_exit)
+
     # Inicia o loop de eventos do GLUT. Este é o último comando.
     glutMainLoop()
+
+    
 
 if __name__ == '__main__':
     main()
